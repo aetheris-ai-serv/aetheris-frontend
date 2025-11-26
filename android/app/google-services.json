@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "56635991201",
+    "project_id": "aetheris-a0d38",
+    "storage_bucket": "aetheris-a0d38.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:56635991201:android:a062e14954039c4321bce0",
+        "android_client_info": {
+          "package_name": "com.example.demo"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "56635991201-dd22ulndgo8ontckat598a7ls2va7644.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.demo",
+            "certificate_hash": "6b75ff001f94cae3fb8c83ef31525c45fd5ed02f"
+          }
+        },
+        {
+          "client_id": "56635991201-e2hgpcrb9adthrkf3vajqu0mmtfbbr6d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMyxzsbh-M1Z9dp8_61vXyHCzlKK1H5m8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "56635991201-e2hgpcrb9adthrkf3vajqu0mmtfbbr6d.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
