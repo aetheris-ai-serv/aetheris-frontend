@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: isLoggedIn ? '/home' : '/get started', // ✅ check here
       routes: {
-        '/get started': (context) => getStarted(),
+        '/get started': (context) => GetStarted(),
         '/sign up': (context) => MyHomePage(title: 'Hello World'),
         '/login': (context) => LoginPage(),
         '/map': (context) => MapPage(),
@@ -131,7 +131,7 @@ class _LoginPageState extends State<LoginPage> {
           child: Center(
             child: GlassContainer(
               vwidth: MediaQuery.of(context).size.width * 0.85,
-              vheight: MediaQuery.of(context).size.height * 0.5,
+              vheight: MediaQuery.of(context).size.height * 0.6,
               vchild: Container(
                 decoration: BoxDecoration(
                   color: Colors.transparent,
@@ -316,7 +316,7 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Center(
             child: GlassContainer(
               vwidth: MediaQuery.of(context).size.width * 0.85,
-              vheight: MediaQuery.of(context).size.height * 0.5,
+              vheight: MediaQuery.of(context).size.height * 0.6,
               vchild: Container(
                 decoration: BoxDecoration(
                   color: Colors.transparent,

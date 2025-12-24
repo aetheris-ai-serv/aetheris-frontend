@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'services/speed_service.dart';
 
 class Mycam extends StatefulWidget {
   const Mycam({super.key});
@@ -30,12 +31,7 @@ class _MycamState extends State<Mycam> {
         width: double.infinity,
         height: double.infinity,
 
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage("images/page 3.png"),
-            fit: BoxFit.cover,
-          ),
-        ),
+        decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
 
         child: Column(
           children: [
@@ -47,8 +43,12 @@ class _MycamState extends State<Mycam> {
               height: MediaQuery.of(context).size.height * 0.5,
               width: MediaQuery.of(context).size.width * 0.9,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: const Color.fromARGB(173, 160, 160, 160),
                 borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFF4D4DFF), // border color
+                  width: 2, // border width
+                ),
               ),
             ),
 
@@ -59,8 +59,12 @@ class _MycamState extends State<Mycam> {
               height: MediaQuery.of(context).size.height * 0.2,
               width: MediaQuery.of(context).size.width * 0.9,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: const Color.fromARGB(173, 160, 160, 160),
                 borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFF4D4DFF), // border color
+                  width: 2, // border width
+                ),
               ),
             ),
           ],
@@ -80,47 +84,79 @@ class BottomBar extends StatefulWidget {
 class _BottomBarState extends State<BottomBar> {
   int currentVal = 0;
 
+  @override
+  void initState() {
+    super.initState();
+
+    // 🔥 START SPEED TRACKING WHEN APP OPENS
+    SpeedService().start();
+  }
+
   final List<Widget> ScreenList = [
     const Mycam(),
     const MapPage(),
     const SettingsPage(),
     const ProfilePage(),
   ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent, // 👈 IMPORTANT
       body: ScreenList[currentVal],
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        currentIndex: currentVal,
-        onTap: (index) {
-          setState(() {
-            currentVal = index; // update selected page
-          });
-        },
-        backgroundColor: const Color.fromARGB(255, 255, 255, 255),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-            backgroundColor: Color.fromARGB(255, 255, 255, 255),
+
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.map),
-            label: 'Map',
-            backgroundColor: Color.fromARGB(255, 255, 255, 255),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: BottomNavigationBar(
+              currentIndex: currentVal,
+              onTap: (index) {
+                setState(() => currentVal = index);
+              },
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              selectedItemColor: const Color(0xFF4D4DFF),
+              unselectedItemColor: Colors.grey,
+              showUnselectedLabels: false,
+              type: BottomNavigationBarType.fixed,
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.home_outlined),
+                  activeIcon: Icon(Icons.home),
+                  label: 'Home',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.map_outlined),
+                  activeIcon: Icon(Icons.map),
+                  label: 'Map',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.settings_outlined),
+                  activeIcon: Icon(Icons.settings),
+                  label: 'Settings',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person_outline),
+                  activeIcon: Icon(Icons.person),
+                  label: 'Profile',
+                ),
+              ],
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-            backgroundColor: Color.fromARGB(255, 255, 255, 255),
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-            backgroundColor: Color.fromARGB(255, 255, 255, 255),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -143,50 +179,39 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("SETTINGS"),
-        centerTitle: true,
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.black,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-      ),
-      // backgroundColor: Colors.transparent,
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
+    return SafeArea(
+      child: Scaffold(
+        // backgroundColor: Colors.transparent,
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
 
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage("images/page 3.png"),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: ListView.builder(
-          itemCount: myTexts.length,
-          itemBuilder: (context, index) {
-            return Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Container(
-                height: 80,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.8),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Center(
-                  child: Text(
-                    myTexts[index],
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+          decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
+          child: ListView.builder(
+            itemCount: myTexts.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Container(
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Center(
+                    child: Text(
+                      myTexts[index],
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF4D4DFF),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -249,13 +274,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage('images/page 3.png'),
-          fit: BoxFit.cover,
-        ),
-        color: Color.fromARGB(255, 32, 31, 31),
-      ),
+      decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Scaffold(
@@ -271,14 +290,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     width: 400,
                     height: 300,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          const Color.fromARGB(255, 65, 56, 162),
-                          const Color.fromARGB(255, 144, 66, 223),
-                        ],
-                        begin: Alignment.topLeft, // start point
-                        end: Alignment.bottomRight,
-                      ),
+                      color: const Color(0xFF4D4DFF),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Column(

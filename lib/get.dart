@@ -2,15 +2,11 @@ import 'package:flutter/material.dart';
 import 'main.dart';
 import 'dart:ui';
 
-class getStarted extends StatefulWidget {
-  const getStarted({super.key});
+class GetStarted extends StatefulWidget {
+  const GetStarted({super.key});
 
   @override
-  State<getStarted> createState() => _getStartedState();
-}
-
-Future<void> main() async {
-  runApp(const Myapp());
+  State<GetStarted> createState() => _getStartedState();
 }
 
 class Myapp extends StatelessWidget {
@@ -27,12 +23,15 @@ class Myapp extends StatelessWidget {
       ),
       // home: const MyHomePage(title: 'Flutter Demo Home Page'),
       initialRoute: '/get started',
-      routes: {'/sign up': (context) => MyHomePage(title: 'Hello World')},
+      routes: {
+        '/get started': (context) => GetStarted(),
+        '/sign up': (context) => MyHomePage(title: 'Hello World'),
+      },
     );
   }
 }
 
-class _getStartedState extends State<getStarted> {
+class _getStartedState extends State<GetStarted> {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -118,49 +117,23 @@ class _getStartedState extends State<getStarted> {
                         vertical: 10,
                         horizontal: 10,
                       ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color.fromARGB(255, 255, 255, 255),
-                          borderRadius: BorderRadius.circular(30),
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4D4DFF),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
                         ),
-                        height: MediaQuery.of(context).size.height * 0.08,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Column(
-                              children: [
-                                SizedBox(height: 10),
-                                Text(
-                                  'Get started',
-                                  style: TextStyle(
-                                    color: const Color.fromARGB(
-                                      255,
-                                      79,
-                                      142,
-                                      236,
-                                    ),
-                                    fontSize:
-                                        MediaQuery.of(context).size.height *
-                                        0.04,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(width: 75),
-                            IconButton(
-                              onPressed: () {
-                                Navigator.pushReplacementNamed(
-                                  context,
-                                  '/sign up',
-                                );
-                              },
-                              icon: Icon(
-                                Icons.arrow_forward_ios,
-                                color: const Color.fromARGB(255, 79, 142, 236),
-                              ),
-                            ),
-                          ],
+                        onPressed: () {
+                          Navigator.pushReplacementNamed(context, '/sign up');
+                        },
+                        child: const Text(
+                          "Get started",
+                          style: TextStyle(fontSize: 16, color: Colors.white),
                         ),
                       ),
                     ),

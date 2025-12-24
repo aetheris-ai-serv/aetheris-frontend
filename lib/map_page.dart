@@ -22,7 +22,6 @@ class _MapPageState extends State<MapPage> {
   LatLng? _destination;
   bool isloading = true;
   List<List<LatLng>> _routes = [];
-  double _currentSpeed = 0.0; // in km/h
   List<double> _routeDistances = [];
   List<double> _routeDurations = [];
   List<LatLng> _locationHistory = [];
@@ -35,22 +34,6 @@ class _MapPageState extends State<MapPage> {
   void initState() {
     super.initState();
     _initializeLocation();
-    _startTrackingSpeed();
-  }
-
-  void _startTrackingSpeed() {
-    _location.changeSettings(
-      accuracy: LocationAccuracy.high,
-      interval: 50, // update every second
-    );
-
-    _location.onLocationChanged.listen((locData) {
-      if (locData.speed != null) {
-        setState(() {
-          _currentSpeed = locData.speed! * 3.6; // m/s → km/h
-        });
-      }
-    });
   }
 
   LatLng _smoothLocation(LatLng newPoint) {
@@ -79,19 +62,6 @@ class _MapPageState extends State<MapPage> {
       if (!serviceEnabled) return false;
     }
 
-    PermissionStatus permissionGranted = await _location.hasPermission();
-    if (permissionGranted == PermissionStatus.denied) {
-      permissionGranted = await _location.requestPermission();
-      if (permissionGranted != PermissionStatus.granted) return false;
-    }
-
-    // ✅ Apply high accuracy GPS settings
-    _location.changeSettings(
-      accuracy: LocationAccuracy.high,
-      interval: 50, // update every 1s(1000ms)
-      distanceFilter: 0, // get updates even for small movements
-    );
-
     final initialData = await _location.getLocation();
     if (initialData.latitude != null && initialData.longitude != null) {
       setState(() {
@@ -119,7 +89,7 @@ class _MapPageState extends State<MapPage> {
           );
           isloading = false;
         });
-        // _mapController.move(smoothedPoint, 15.0);
+        _mapController.move(smoothedPoint, 15.0);
 
         // 🔥 Recalculate route if destination is set
         if (_destination != null) {
@@ -386,16 +356,12 @@ class _MapPageState extends State<MapPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        foregroundColor: Colors.white,
-        title: const Text('MAP'),
-        backgroundColor: Colors.blueAccent,
-        centerTitle: true,
-      ),
+      backgroundColor: const Color(0xFF0A0A0E),
       body: _currentLocation == null
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
+                SizedBox(height: MediaQuery.of(context).size.width * 0.1),
                 FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
@@ -434,9 +400,9 @@ class _MapPageState extends State<MapPage> {
                               points: _routes[i],
                               strokeWidth: i == _selectedRouteIndex ? 6.0 : 4.0,
                               color: [
-                                Colors.blue,
-                                Colors.green,
-                                Colors.orange,
+                                Color(0xFF4D4DFF), // neon blue
+                                Color(0xFF00E676), // neon green
+                                Color(0xFFFF9100), // neon orange
                               ][i], // Different colors for each route
                             ),
                         ],
@@ -473,13 +439,16 @@ class _MapPageState extends State<MapPage> {
                     padding: const EdgeInsets.all(8),
                     child: Row(
                       children: [
+                        SizedBox(height: 150),
                         Expanded(
                           child: TextField(
                             controller: _locationController,
+                            style: TextStyle(color: Colors.white),
                             decoration: InputDecoration(
                               filled: true,
-                              fillColor: Colors.white,
+                              fillColor: const Color(0xFF0A0A0E),
                               hintText: 'Enter a location',
+                              hintStyle: TextStyle(color: Color(0xFF4D4DFF)),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(30),
                                 borderSide: BorderSide.none,
@@ -493,7 +462,7 @@ class _MapPageState extends State<MapPage> {
                         SizedBox(width: 8),
                         Container(
                           decoration: BoxDecoration(
-                            color: Color.fromARGB(255, 2, 82, 255),
+                            color: Color(0xFF4D4DFF),
                             shape: BoxShape.circle,
                           ),
                           height: 50,
@@ -522,8 +491,8 @@ class _MapPageState extends State<MapPage> {
                       ? Container(
                           padding: EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
+                            color: const Color(0xFF121212),
+
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black26,
@@ -538,6 +507,7 @@ class _MapPageState extends State<MapPage> {
                               Text(
                                 "Select Route",
                                 style: TextStyle(
+                                  color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
@@ -558,6 +528,7 @@ class _MapPageState extends State<MapPage> {
                                   subtitle: Text(
                                     "${_routeDistances[i].toStringAsFixed(1)} km • ${_routeDurations[i].toStringAsFixed(0)} min",
                                   ),
+                                  textColor: Colors.white,
                                   onTap: () {
                                     // Highlight selected route
                                     _highlightRoute(i);
@@ -573,7 +544,7 @@ class _MapPageState extends State<MapPage> {
       floatingActionButton: FloatingActionButton(
         elevation: 0,
         onPressed: _userCurrentLocation,
-        backgroundColor: Colors.blue,
+        backgroundColor: const Color(0xFF4D4DFF),
         child: const Icon(Icons.my_location, size: 30, color: Colors.white),
       ),
     );
