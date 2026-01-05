@@ -6,6 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/speed_service.dart';
+import 'package:camera/camera.dart';
+import 'dart:async';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class Mycam extends StatefulWidget {
   const Mycam({super.key});
@@ -19,9 +24,73 @@ final TextEditingController ageController = TextEditingController();
 final TextEditingController cityController = TextEditingController();
 
 class _MycamState extends State<Mycam> {
+  Timer? _frameTimer;
+  CameraController? _cameraController;
+  late List<CameraDescription> _cameras;
+  bool _isCameraReady = false;
   @override
   void initState() {
     super.initState();
+    _initCamera();
+  }
+
+  Future<void> _initCamera() async {
+    _cameras = await availableCameras();
+
+    _cameraController = CameraController(
+      _cameras[0], // rear camera
+      ResolutionPreset.medium,
+      enableAudio: false,
+    );
+
+    await _cameraController!.initialize();
+
+    if (!mounted) return;
+
+    _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (_cameraController!.value.isInitialized) {
+        final XFile file = await _cameraController!.takePicture();
+        final Uint8List bytes = await file.readAsBytes();
+        await sendFrame(bytes);
+      }
+    });
+
+    setState(() {
+      _isCameraReady = true;
+    });
+  }
+
+  Future<void> sendFrame(Uint8List imageBytes) async {
+    try {
+      final request = http.MultipartRequest(
+        "POST",
+        Uri.parse("http://10.242.46.233:8000/frame"),
+      );
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          "file",
+          imageBytes,
+          filename: "frame.jpg",
+          contentType: MediaType("image", "jpeg"),
+        ),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint("📤 Frame sent");
+      debugPrint("📥 Backend response: ${response.body}");
+    } catch (e) {
+      debugPrint("❌ Error sending frame: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _frameTimer?.cancel();
+    _cameraController?.dispose();
+    super.dispose();
   }
 
   @override
@@ -36,7 +105,6 @@ class _MycamState extends State<Mycam> {
         child: Column(
           children: [
             SizedBox(height: MediaQuery.of(context).size.height * 0.01),
-            SizedBox(height: MediaQuery.of(context).size.width * 0.2),
 
             // First Container
             Container(
@@ -49,6 +117,16 @@ class _MycamState extends State<Mycam> {
                   color: const Color(0xFF4D4DFF), // border color
                   width: 2, // border width
                 ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: _isCameraReady
+                    ? CameraPreview(_cameraController!)
+                    : const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF4D4DFF),
+                        ),
+                      ),
               ),
             ),
 

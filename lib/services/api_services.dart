@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = "http://10.104.15.233:8000";
+  static const String baseUrl = "http://10.242.46.233:8000/";
   // Android Emulator → 10.0.2.2
   // iOS Simulator → localhost
   // Real Device → PC IP
