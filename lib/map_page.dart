@@ -14,6 +14,8 @@ class MapPage extends StatefulWidget {
   State<MapPage> createState() => _MapPageState();
 }
 
+StreamSubscription<LocationData>? _locationSub;
+
 class _MapPageState extends State<MapPage> {
   final MapController _mapController = MapControllerImpl();
   final Location _location = Location();
@@ -73,25 +75,26 @@ class _MapPageState extends State<MapPage> {
       });
     }
     await fetchOverpassData();
-    _location.onLocationChanged.listen((LocationData locationData) {
+    _locationSub = _location.onLocationChanged.listen((
+      LocationData locationData,
+    ) {
+      if (!mounted) return; // 🔥 CRITICAL
+
       if (locationData.latitude != null && locationData.longitude != null) {
         LatLng rawPoint = LatLng(
           locationData.latitude!,
           locationData.longitude!,
         );
 
-        // ✅ apply smoothing
         LatLng smoothedPoint = _smoothLocation(rawPoint);
+
         setState(() {
-          _currentLocation = LatLng(
-            locationData.latitude!,
-            locationData.longitude!,
-          );
+          _currentLocation = smoothedPoint;
           isloading = false;
         });
+
         _mapController.move(smoothedPoint, 15.0);
 
-        // 🔥 Recalculate route if destination is set
         if (_destination != null) {
           final now = DateTime.now();
           if (now.difference(_lastRouteRequest).inSeconds > 10) {
@@ -101,6 +104,7 @@ class _MapPageState extends State<MapPage> {
         }
       }
     });
+
     return true;
   }
 
@@ -146,6 +150,7 @@ class _MapPageState extends State<MapPage> {
             junctionPoints.add(nodeCoords[entry.key]!);
           }
         }
+        if (!mounted) return;
         setState(() {
           _osmSignals = junctionPoints;
         });
@@ -351,6 +356,13 @@ class _MapPageState extends State<MapPage> {
     _mapController.fitCamera(
       CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
     );
+  }
+
+  @override
+  void dispose() {
+    _locationSub?.cancel(); // 🔥 THIS FIXES THE CRASH
+    _locationController.dispose();
+    super.dispose();
   }
 
   @override

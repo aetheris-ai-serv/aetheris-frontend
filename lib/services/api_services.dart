@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = "http://10.242.46.233:8000/";
+  static const String baseurl = "https://aetheris-backend-ev4r.onrender.com";
   // Android Emulator → 10.0.2.2
   // iOS Simulator → localhost
   // Real Device → PC IP
@@ -10,7 +10,7 @@ class ApiService {
   static Future<String> sendSpeed(double speed) async {
     try {
       final response = await http.post(
-        Uri.parse("$baseUrl/speed"),
+        Uri.parse("$baseurl/speed"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"speed": speed}),
       );

@@ -27,7 +27,12 @@ class _MycamState extends State<Mycam> {
   Timer? _frameTimer;
   CameraController? _cameraController;
   late List<CameraDescription> _cameras;
+  bool _isCapturing = false;
   bool _isCameraReady = false;
+  bool _isDetecting = false;
+
+  final String baseUrl = "https://aetheris-backend-ev4r.onrender.com";
+
   @override
   void initState() {
     super.initState();
@@ -38,33 +43,62 @@ class _MycamState extends State<Mycam> {
     _cameras = await availableCameras();
 
     _cameraController = CameraController(
-      _cameras[0], // rear camera
+      _cameras[0],
       ResolutionPreset.medium,
       enableAudio: false,
     );
 
     await _cameraController!.initialize();
 
+    // 🔥 FORCE FLASH OFF (CRITICAL)
+    await _cameraController!.setFlashMode(FlashMode.off);
     if (!mounted) return;
-
-    _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      if (_cameraController!.value.isInitialized) {
-        final XFile file = await _cameraController!.takePicture();
-        final Uint8List bytes = await file.readAsBytes();
-        await sendFrame(bytes);
-      }
-    });
 
     setState(() {
       _isCameraReady = true;
     });
   }
 
+  /// 🟢 START detection
+  Future<void> startDetection() async {
+    await http.post(Uri.parse("$baseUrl/start-detection"));
+
+    setState(() => _isDetecting = true);
+
+    _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!_isDetecting) return;
+      if (!_cameraController!.value.isInitialized) return;
+      if (_isCapturing) return;
+
+      _isCapturing = true;
+
+      try {
+        final XFile file = await _cameraController!.takePicture();
+        final Uint8List bytes = await file.readAsBytes();
+        await sendFrame(bytes);
+      } catch (e) {
+        debugPrint("❌ Capture error: $e");
+      } finally {
+        _isCapturing = false;
+      }
+    });
+  }
+
+  /// 🔴 STOP detection
+  Future<void> stopDetection() async {
+    await http.post(Uri.parse("$baseUrl/stop-detection"));
+
+    await _cameraController?.stopImageStream();
+
+    setState(() => _isDetecting = false);
+  }
+
+  /// 📤 Send frame to backend
   Future<void> sendFrame(Uint8List imageBytes) async {
     try {
       final request = http.MultipartRequest(
         "POST",
-        Uri.parse("http://10.242.46.233:8000/frame"),
+        Uri.parse("$baseUrl/frame"),
       );
 
       request.files.add(
@@ -76,11 +110,11 @@ class _MycamState extends State<Mycam> {
         ),
       );
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await request.send();
+      final body = await response.stream.bytesToString();
 
       debugPrint("📤 Frame sent");
-      debugPrint("📥 Backend response: ${response.body}");
+      debugPrint("📥 Backend response: $body");
     } catch (e) {
       debugPrint("❌ Error sending frame: $e");
     }
@@ -139,10 +173,26 @@ class _MycamState extends State<Mycam> {
               decoration: BoxDecoration(
                 color: const Color.fromARGB(173, 160, 160, 160),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF4D4DFF), // border color
-                  width: 2, // border width
-                ),
+                border: Border.all(color: const Color(0xFF4D4DFF), width: 2),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    onPressed: _isDetecting ? null : startDetection,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                    ),
+                    child: const Text("START"),
+                  ),
+                  ElevatedButton(
+                    onPressed: _isDetecting ? stopDetection : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    child: const Text("STOP"),
+                  ),
+                ],
               ),
             ),
           ],
