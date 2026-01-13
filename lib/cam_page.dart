@@ -34,7 +34,7 @@ class _MycamState extends State<Mycam> {
   Timer? _backendTimer;
   double riskScore = 0.0;
   String alertText = "Normal";
-  final String baseUrl = "http://192.168.0.5:8000";
+  final String baseUrl = "https://aetheris-backend-ev4r.onrender.com";
 
   @override
   void initState() {
