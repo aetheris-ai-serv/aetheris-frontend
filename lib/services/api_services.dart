@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseurl = "https://aetheris-backend-ev4r.onrender.com";
+  static const String baseurl = "http://192.168.0.5:8000";
   // Android Emulator → 10.0.2.2
   // iOS Simulator → localhost
   // Real Device → PC IP

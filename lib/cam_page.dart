@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:demo/map_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -30,13 +31,32 @@ class _MycamState extends State<Mycam> {
   bool _isCapturing = false;
   bool _isCameraReady = false;
   bool _isDetecting = false;
-
-  final String baseUrl = "https://aetheris-backend-ev4r.onrender.com";
+  Timer? _backendTimer;
+  double riskScore = 0.0;
+  String alertText = "Normal";
+  final String baseUrl = "http://192.168.0.5:8000";
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+  }
+
+  Future<void> fetchBackendStatus() async {
+    try {
+      final res = await http.get(Uri.parse("$baseUrl/status"));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+
+        setState(() {
+          riskScore = (data["risk"] ?? 0).toDouble();
+          alertText = data["alert"] ?? "Normal";
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Status fetch error: $e");
+    }
   }
 
   Future<void> _initCamera() async {
@@ -65,6 +85,12 @@ class _MycamState extends State<Mycam> {
 
     setState(() => _isDetecting = true);
 
+    // 🔁 POLL BACKEND EVERY 1 SECOND
+    _backendTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => fetchBackendStatus(),
+    );
+
     _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (!_isDetecting) return;
       if (!_cameraController!.value.isInitialized) return;
@@ -89,7 +115,8 @@ class _MycamState extends State<Mycam> {
     await http.post(Uri.parse("$baseUrl/stop-detection"));
 
     await _cameraController?.stopImageStream();
-
+    _backendTimer?.cancel();
+    _frameTimer?.cancel();
     setState(() => _isDetecting = false);
   }
 
@@ -163,6 +190,16 @@ class _MycamState extends State<Mycam> {
                       ),
               ),
             ),
+
+            Text(
+              "Risk: $riskScore",
+              style: TextStyle(
+                color: riskScore > 7 ? Colors.red : Colors.green,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(alertText, style: const TextStyle(fontSize: 18)),
 
             SizedBox(height: MediaQuery.of(context).size.width * 0.1),
 
