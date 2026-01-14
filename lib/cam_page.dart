@@ -48,7 +48,7 @@ class _MycamState extends State<Mycam> {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-
+        if (!mounted) return;
         setState(() {
           riskScore = (data["risk"] ?? 0).toDouble();
           alertText = data["alert"] ?? "Normal";
@@ -82,7 +82,7 @@ class _MycamState extends State<Mycam> {
   /// 🟢 START detection
   Future<void> startDetection() async {
     await http.post(Uri.parse("$baseUrl/start-detection"));
-
+    if (!mounted) return;
     setState(() => _isDetecting = true);
 
     // 🔁 POLL BACKEND EVERY 1 SECOND
@@ -92,7 +92,9 @@ class _MycamState extends State<Mycam> {
     );
 
     _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!mounted) return;
       if (!_isDetecting) return;
+      if (_cameraController == null) return;
       if (!_cameraController!.value.isInitialized) return;
       if (_isCapturing) return;
 
@@ -149,6 +151,7 @@ class _MycamState extends State<Mycam> {
 
   @override
   void dispose() {
+    _backendTimer?.cancel();
     _frameTimer?.cancel();
     _cameraController?.dispose();
     super.dispose();
