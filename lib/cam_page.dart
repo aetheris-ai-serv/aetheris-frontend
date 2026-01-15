@@ -26,15 +26,16 @@ final TextEditingController cityController = TextEditingController();
 
 class _MycamState extends State<Mycam> {
   Timer? _frameTimer;
+  Timer? _backendTimer;
   CameraController? _cameraController;
   late List<CameraDescription> _cameras;
-  bool _isCapturing = false;
   bool _isCameraReady = false;
   bool _isDetecting = false;
-  Timer? _backendTimer;
-  double riskScore = 0.0;
-  String alertText = "Normal";
-  final String baseUrl = "https://aetheris-backend-ev4r.onrender.com";
+  bool _isCapturing = false;
+
+  double trafficLevel = 0.0;
+  String trafficStatus = "Unknown";
+  final String baseUrl = "http://192.168.0.6:8000";
 
   @override
   void initState() {
@@ -42,26 +43,8 @@ class _MycamState extends State<Mycam> {
     _initCamera();
   }
 
-  Future<void> fetchBackendStatus() async {
-    try {
-      final res = await http.get(Uri.parse("$baseUrl/status"));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (!mounted) return;
-        setState(() {
-          riskScore = (data["risk"] ?? 0).toDouble();
-          alertText = data["alert"] ?? "Normal";
-        });
-      }
-    } catch (e) {
-      debugPrint("❌ Status fetch error: $e");
-    }
-  }
-
   Future<void> _initCamera() async {
     _cameras = await availableCameras();
-
     _cameraController = CameraController(
       _cameras[0],
       ResolutionPreset.medium,
@@ -69,39 +52,63 @@ class _MycamState extends State<Mycam> {
     );
 
     await _cameraController!.initialize();
-
-    // 🔥 FORCE FLASH OFF (CRITICAL)
     await _cameraController!.setFlashMode(FlashMode.off);
-    if (!mounted) return;
 
-    setState(() {
-      _isCameraReady = true;
-    });
+    if (mounted) {
+      setState(() => _isCameraReady = true);
+    }
   }
 
-  /// 🟢 START detection
+  Future<void> fetchTrafficStatus() async {
+    try {
+      final res = await http.get(Uri.parse("$baseUrl/status"));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          setState(() {
+            trafficLevel = (data["traffic_level"] ?? 0).toDouble();
+            trafficStatus = data["traffic_status"] ?? "Unknown";
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Status fetch error: $e");
+    }
+  }
+
   Future<void> startDetection() async {
-    await http.post(Uri.parse("$baseUrl/start-detection"));
-    if (!mounted) return;
+    if (_isDetecting) return;
+
+    _frameTimer?.cancel();
+    _backendTimer?.cancel();
+
     setState(() => _isDetecting = true);
 
-    // 🔁 POLL BACKEND EVERY 1 SECOND
+    try {
+      await http.post(Uri.parse("$baseUrl/start-detection"));
+    } catch (e) {
+      debugPrint("❌ Start detection error: $e");
+    }
+
+    // Fetch traffic status every 2 seconds
     _backendTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => fetchBackendStatus(),
+      const Duration(seconds: 2),
+      (_) => fetchTrafficStatus(),
     );
 
+    // Send frame every 5 seconds
     _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      if (!mounted) return;
-      if (!_isDetecting) return;
-      if (_cameraController == null) return;
-      if (!_cameraController!.value.isInitialized) return;
-      if (_isCapturing) return;
+      if (!_isDetecting || _isCapturing || !mounted) return;
+
+      final controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) return;
+      if (controller.value.isTakingPicture) return;
 
       _isCapturing = true;
 
       try {
-        final XFile file = await _cameraController!.takePicture();
+        final XFile file = await controller.takePicture();
         final Uint8List bytes = await file.readAsBytes();
         await sendFrame(bytes);
       } catch (e) {
@@ -112,17 +119,23 @@ class _MycamState extends State<Mycam> {
     });
   }
 
-  /// 🔴 STOP detection
   Future<void> stopDetection() async {
-    await http.post(Uri.parse("$baseUrl/stop-detection"));
+    if (!_isDetecting) return;
 
-    await _cameraController?.stopImageStream();
-    _backendTimer?.cancel();
-    _frameTimer?.cancel();
     setState(() => _isDetecting = false);
+
+    _frameTimer?.cancel();
+    _backendTimer?.cancel();
+    _frameTimer = null;
+    _backendTimer = null;
+
+    try {
+      await http.post(Uri.parse("$baseUrl/stop-detection"));
+    } catch (e) {
+      debugPrint("❌ Stop detection error: $e");
+    }
   }
 
-  /// 📤 Send frame to backend
   Future<void> sendFrame(Uint8List imageBytes) async {
     try {
       final request = http.MultipartRequest(
@@ -139,11 +152,8 @@ class _MycamState extends State<Mycam> {
         ),
       );
 
-      final response = await request.send();
-      final body = await response.stream.bytesToString();
-
-      debugPrint("📤 Frame sent");
-      debugPrint("📥 Backend response: $body");
+      await request.send();
+      debugPrint("📤 Frame sent successfully");
     } catch (e) {
       debugPrint("❌ Error sending frame: $e");
     }
@@ -151,8 +161,9 @@ class _MycamState extends State<Mycam> {
 
   @override
   void dispose() {
-    _backendTimer?.cancel();
+    _isDetecting = false;
     _frameTimer?.cancel();
+    _backendTimer?.cancel();
     _cameraController?.dispose();
     super.dispose();
   }
@@ -163,24 +174,19 @@ class _MycamState extends State<Mycam> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-
         decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
-
         child: Column(
           children: [
             SizedBox(height: MediaQuery.of(context).size.height * 0.01),
 
-            // First Container
+            // Camera Preview
             Container(
               height: MediaQuery.of(context).size.height * 0.5,
               width: MediaQuery.of(context).size.width * 0.9,
               decoration: BoxDecoration(
                 color: const Color.fromARGB(173, 160, 160, 160),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF4D4DFF), // border color
-                  width: 2, // border width
-                ),
+                border: Border.all(color: const Color(0xFF4D4DFF), width: 2),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -194,19 +200,25 @@ class _MycamState extends State<Mycam> {
               ),
             ),
 
+            SizedBox(height: 20),
+
+            // Traffic Level Display
             Text(
-              "Risk: $riskScore",
+              "Traffic Level: ${trafficLevel.toStringAsFixed(1)}",
               style: TextStyle(
-                color: riskScore > 7 ? Colors.red : Colors.green,
+                color: trafficLevel > 7 ? Colors.red : Colors.green,
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            Text(alertText, style: const TextStyle(fontSize: 18)),
+            Text(
+              trafficStatus,
+              style: const TextStyle(fontSize: 18, color: Colors.white),
+            ),
 
             SizedBox(height: MediaQuery.of(context).size.width * 0.1),
 
-            // Second Container
+            // Control Buttons
             Container(
               height: MediaQuery.of(context).size.height * 0.2,
               width: MediaQuery.of(context).size.width * 0.9,
@@ -222,6 +234,7 @@ class _MycamState extends State<Mycam> {
                     onPressed: _isDetecting ? null : startDetection,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
+                      disabledBackgroundColor: Colors.grey,
                     ),
                     child: const Text("START"),
                   ),
@@ -229,6 +242,7 @@ class _MycamState extends State<Mycam> {
                     onPressed: _isDetecting ? stopDetection : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
+                      disabledBackgroundColor: Colors.grey,
                     ),
                     child: const Text("STOP"),
                   ),
@@ -271,7 +285,7 @@ class _BottomBarState extends State<BottomBar> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent, // 👈 IMPORTANT
-      body: ScreenList[currentVal],
+      body: IndexedStack(index: currentVal, children: ScreenList),
 
       bottomNavigationBar: SafeArea(
         child: Container(
@@ -292,8 +306,16 @@ class _BottomBarState extends State<BottomBar> {
             child: BottomNavigationBar(
               currentIndex: currentVal,
               onTap: (index) {
+                if (currentVal == 0 && index != 0) {
+                  // Leaving camera tab
+                  final cam = ScreenList[0];
+                  if (cam is Mycam) {
+                    // handled via dispose + timer cancel
+                  }
+                }
                 setState(() => currentVal = index);
               },
+
               backgroundColor: Colors.transparent,
               elevation: 0,
               selectedItemColor: const Color(0xFF4D4DFF),
