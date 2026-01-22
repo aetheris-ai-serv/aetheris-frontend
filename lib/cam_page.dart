@@ -35,7 +35,7 @@ class _MycamState extends State<Mycam> {
 
   double trafficLevel = 0.0;
   String trafficStatus = "Unknown";
-  final String baseUrl = "https://aetheris-backend-a56i.onrender.com";
+  final String baseUrl = "https://aetheris-backend-h4xm.onrender.com";
 
   @override
   void initState() {
