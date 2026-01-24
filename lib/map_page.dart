@@ -30,8 +30,9 @@ class _MapPageState extends State<MapPage> {
   int _selectedRouteIndex = 0;
   List<LatLng> _osmSignals = [];
   DateTime _lastRouteRequest = DateTime.now();
+  bool _isRoutePanelOpen = false;
+  bool _followUser = true;
 
-  @override
   @override
   void initState() {
     super.initState();
@@ -42,7 +43,7 @@ class _MapPageState extends State<MapPage> {
     _locationHistory.add(newPoint);
 
     if (_locationHistory.length > 5) {
-      _locationHistory.removeAt(0); // keep only 5
+      _locationHistory.removeAt(0);
     }
 
     double avgLat =
@@ -78,7 +79,7 @@ class _MapPageState extends State<MapPage> {
     _locationSub = _location.onLocationChanged.listen((
       LocationData locationData,
     ) {
-      if (!mounted) return; // 🔥 CRITICAL
+      if (!mounted) return;
 
       if (locationData.latitude != null && locationData.longitude != null) {
         LatLng rawPoint = LatLng(
@@ -93,7 +94,9 @@ class _MapPageState extends State<MapPage> {
           isloading = false;
         });
 
-        _mapController.move(smoothedPoint, 15.0);
+        if (_followUser) {
+          _mapController.move(smoothedPoint, _mapController.camera.zoom);
+        }
 
         if (_destination != null) {
           final now = DateTime.now();
@@ -114,7 +117,6 @@ class _MapPageState extends State<MapPage> {
       return;
     }
 
-    // Example: fetch all junctions around your current location (200m radius)
     final query =
         """
           [out:json];
@@ -143,7 +145,6 @@ class _MapPageState extends State<MapPage> {
           }
         }
 
-        // pick junctions = nodes that belong to 2+ ways
         List<LatLng> junctionPoints = [];
         for (var entry in nodeCount.entries) {
           if (entry.value > 1 && nodeCoords.containsKey(entry.key)) {
@@ -171,18 +172,12 @@ class _MapPageState extends State<MapPage> {
 
     final response = await http.get(
       url,
-      headers: {
-        'User-Agent': 'demo/1.0 (syed.mikraam@gmail.com)', // required
-      },
+      headers: {'User-Agent': 'demo/1.0 (syed.mikraam@gmail.com)'},
     );
-    //error handling
-    //
-    //
+
     print("Response Code: ${response.statusCode}");
     print("Response Body: ${response.body}");
-    //
-    //
-    //
+
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       if (data.isNotEmpty) {
@@ -193,10 +188,10 @@ class _MapPageState extends State<MapPage> {
         });
         await _fetchRoute();
       } else {
-        errorMessage('Location not found.Please try another search');
+        errorMessage('Location not found. Please try another search');
       }
     } else {
-      errorMessage('Failed to fetch location.Try again later.');
+      errorMessage('Failed to fetch location. Try again later.');
     }
   }
 
@@ -223,7 +218,6 @@ class _MapPageState extends State<MapPage> {
           List<double> distances = [];
           List<double> durations = [];
 
-          // Process each route
           for (var routeData in data['routes']) {
             final geometry = routeData['geometry']['coordinates'] as List;
             List<LatLng> routePoints = geometry
@@ -231,11 +225,8 @@ class _MapPageState extends State<MapPage> {
                 .toList();
             allRoutes.add(routePoints);
 
-            // Extract distance and duration for each route
-            distances.add(routeData['distance'] / 1000); // Convert meters to km
-            durations.add(
-              routeData['duration'] / 60,
-            ); // Convert seconds to minutes
+            distances.add(routeData['distance'] / 1000);
+            durations.add(routeData['duration'] / 60);
           }
 
           setState(() {
@@ -246,9 +237,8 @@ class _MapPageState extends State<MapPage> {
           if (allRoutes.isNotEmpty) {
             _fetchJunctionsAlongRoute(allRoutes[0]);
           }
-          // Zoom to route
+
           if (_routes.isNotEmpty) {
-            // Combine all route points to calculate bounds
             List<LatLng> allPoints = [];
             for (var route in _routes) {
               allPoints.addAll(route);
@@ -277,7 +267,6 @@ class _MapPageState extends State<MapPage> {
     List<LatLng> junctions = [];
 
     for (int i = 0; i < route.length; i += 20) {
-      // every ~20th point
       final lat = route[i].latitude;
       final lng = route[i].longitude;
 
@@ -306,7 +295,7 @@ class _MapPageState extends State<MapPage> {
     }
 
     setState(() {
-      _osmSignals = junctions; // keep them in a list
+      _osmSignals = junctions;
     });
   }
 
@@ -351,7 +340,6 @@ class _MapPageState extends State<MapPage> {
       _selectedRouteIndex = index;
     });
 
-    // Zoom to the selected route
     final bounds = LatLngBounds.fromPoints(_routes[index]);
     _mapController.fitCamera(
       CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
@@ -360,7 +348,7 @@ class _MapPageState extends State<MapPage> {
 
   @override
   void dispose() {
-    _locationSub?.cancel(); // 🔥 THIS FIXES THE CRASH
+    _locationSub?.cancel();
     _locationController.dispose();
     super.dispose();
   }
@@ -373,102 +361,221 @@ class _MapPageState extends State<MapPage> {
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
-                SizedBox(height: MediaQuery.of(context).size.width * 0.1),
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: LatLng(0, 0),
-                    initialZoom: 2,
-                    minZoom: 0,
-                    maxZoom: 100,
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                // 🎨 3D PERSPECTIVE MAP
+                Transform(
+                  transform: Matrix4.identity()
+                    ..setEntry(3, 2, 0.001) // Perspective depth
+                    ..rotateX(-0.3), // 3D tilt angle
+                  alignment: Alignment.center,
+                  child: FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: _currentLocation ?? LatLng(0, 0),
+                      initialZoom: 15,
+                      minZoom: 5,
                       maxZoom: 19,
+                      initialRotation:
+                          -15.0, // Slight rotation for dynamic view
+                      onPositionChanged: (position, hasGesture) {
+                        if (hasGesture && _followUser) {
+                          setState(() {
+                            _followUser = false;
+                          });
+                        }
+                      },
                     ),
-                    if (_osmSignals.isNotEmpty && _destination != null)
-                      MarkerLayer(
-                        markers: _osmSignals.map((point) {
-                          return Marker(
-                            point: point,
-                            width: 40,
-                            height: 40,
-                            child: Icon(
-                              Icons.circle, // 🚦 traffic light icon
-                              color: Colors.red,
-                              size: 8,
-                            ),
-                          );
-                        }).toList(),
+                    children: [
+                      // 🌙 DARK THEME MAP
+                      TileLayer(
+                        urlTemplate:
+                            'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                        subdomains: ['a', 'b', 'c', 'd'],
+                        maxZoom: 19,
+                        userAgentPackageName: 'com.example.app',
                       ),
 
-                    if (_routes.isNotEmpty)
-                      PolylineLayer(
-                        polylines: [
-                          for (int i = 0; i < _routes.length; i++)
-                            Polyline(
-                              points: _routes[i],
-                              strokeWidth: i == _selectedRouteIndex ? 6.0 : 4.0,
-                              color: [
-                                Color(0xFF4D4DFF), // neon blue
-                                Color(0xFF00E676), // neon green
-                                Color(0xFFFF9100), // neon orange
-                              ][i], // Different colors for each route
-                            ),
-                        ],
-                      ),
-                    CurrentLocationLayer(
-                      style: LocationMarkerStyle(
-                        marker: DefaultLocationMarker(),
-                        markerSize: Size(20, 20),
-                        markerDirection: MarkerDirection.heading,
-                      ),
-                    ),
-                    if (_destination != null)
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: _destination!,
-                            width: 50,
-                            height: 50,
+                      // 🚦 Junction/Signal Markers
+                      if (_osmSignals.isNotEmpty && _destination != null)
+                        MarkerLayer(
+                          markers: _osmSignals.map((point) {
+                            return Marker(
+                              point: point,
+                              width: 40,
+                              height: 40,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.red.withOpacity(0.3),
+                                  border: Border.all(
+                                    color: Colors.red,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: Icon(
+                                  Icons.traffic,
+                                  color: Colors.red,
+                                  size: 12,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+
+                      // 🛣️ ROUTE LINES
+                      if (_routes.isNotEmpty)
+                        PolylineLayer(
+                          polylines: [
+                            for (int i = 0; i < _routes.length; i++)
+                              Polyline(
+                                points: _routes[i],
+                                strokeWidth: i == _selectedRouteIndex
+                                    ? 7.0
+                                    : 4.0,
+                                color: i == _selectedRouteIndex
+                                    ? Color(0xFF4D4DFF)
+                                    : [
+                                        Color(0xFF4D4DFF).withOpacity(0.5),
+                                        Color.fromARGB(
+                                          255,
+                                          123,
+                                          0,
+                                          230,
+                                        ).withOpacity(0.5),
+                                        Color.fromARGB(
+                                          255,
+                                          255,
+                                          0,
+                                          212,
+                                        ).withOpacity(0.5),
+                                      ][i],
+                                borderColor: Colors.black.withOpacity(0.5),
+                                borderStrokeWidth: 1,
+                              ),
+                          ],
+                        ),
+
+                      // 📍 CURRENT LOCATION
+                      CurrentLocationLayer(
+                        style: LocationMarkerStyle(
+                          marker: DefaultLocationMarker(
+                            color: Color(0xFF4D4DFF),
                             child: Icon(
-                              Icons.location_pin,
-                              size: 40,
-                              color: Colors.red,
+                              Icons.navigation,
+                              color: Colors.white,
+                              size: 16,
                             ),
                           ),
-                        ],
+                          markerSize: Size(30, 30),
+                          markerDirection: MarkerDirection.heading,
+                          headingSectorColor: Color(
+                            0xFF4D4DFF,
+                          ).withOpacity(0.3),
+                          headingSectorRadius: 60,
+                        ),
                       ),
-                  ],
+
+                      // 🎯 DESTINATION MARKER
+                      if (_destination != null)
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: _destination!,
+                              width: 60,
+                              height: 60,
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.red.withOpacity(0.5),
+                                          blurRadius: 10,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      Icons.location_pin,
+                                      size: 30,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
+
+                // 🔍 SEARCH BAR
                 Positioned(
-                  top: 10,
+                  top: 50,
                   right: 10,
                   left: 10,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
                     child: Row(
                       children: [
-                        SizedBox(height: 150),
                         Expanded(
                           child: TextField(
                             controller: _locationController,
                             style: TextStyle(color: Colors.white),
                             decoration: InputDecoration(
                               filled: true,
-                              fillColor: const Color(0xFF0A0A0E),
-                              hintText: 'Enter a location',
-                              hintStyle: TextStyle(color: Color(0xFF4D4DFF)),
+                              fillColor: const Color(0xFF1a1a1e),
+                              hintText: 'Search destination...',
+                              hintStyle: TextStyle(
+                                color: Color(0xFF4D4DFF).withOpacity(0.6),
+                              ),
+                              prefixIcon: Icon(
+                                Icons.search,
+                                color: Color(0xFF4D4DFF),
+                              ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(30),
-                                borderSide: BorderSide.none,
+                                borderSide: BorderSide(
+                                  color: Color(0xFF4D4DFF),
+                                  width: 2,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(30),
+                                borderSide: BorderSide(
+                                  color: Color(0xFF4D4DFF).withOpacity(0.3),
+                                  width: 2,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(30),
+                                borderSide: BorderSide(
+                                  color: Color(0xFF4D4DFF),
+                                  width: 2,
+                                ),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 20,
+                                vertical: 16,
                               ),
                             ),
+                            onSubmitted: (value) {
+                              if (value.isNotEmpty) {
+                                fetchCoordinatesPoint(value);
+                              }
+                            },
                           ),
                         ),
                         SizedBox(width: 8),
@@ -476,11 +583,18 @@ class _MapPageState extends State<MapPage> {
                           decoration: BoxDecoration(
                             color: Color(0xFF4D4DFF),
                             shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0xFF4D4DFF).withOpacity(0.5),
+                                blurRadius: 10,
+                                spreadRadius: 2,
+                              ),
+                            ],
                           ),
-                          height: 50,
-                          width: 50,
+                          height: 56,
+                          width: 56,
                           child: IconButton(
-                            icon: Icon(Icons.search),
+                            icon: Icon(Icons.send),
                             color: Colors.white,
                             onPressed: () {
                               final location = _locationController.text.trim();
@@ -495,69 +609,224 @@ class _MapPageState extends State<MapPage> {
                   ),
                 ),
 
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: _routes.isNotEmpty
-                      ? Container(
-                          padding: EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF121212),
+                // 📊 ROUTE PANEL
+                if (_routes.isNotEmpty)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      height: _isRoutePanelOpen ? 280 : 70,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFF1a1a1e), Color(0xFF0A0A0E)],
+                        ),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(25),
+                        ),
+                        border: Border.all(
+                          color: Color(0xFF4D4DFF).withOpacity(0.3),
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0xFF4D4DFF).withOpacity(0.2),
+                            blurRadius: 20,
+                            offset: Offset(0, -4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          // Handle
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _isRoutePanelOpen = !_isRoutePanelOpen;
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Column(
+                                children: [
+                                  Container(
+                                    width: 50,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: Color(0xFF4D4DFF),
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                  SizedBox(height: 8),
+                                  Icon(
+                                    _isRoutePanelOpen
+                                        ? Icons.keyboard_arrow_down
+                                        : Icons.keyboard_arrow_up,
+                                    color: Color(0xFF4D4DFF),
+                                    size: 28,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
 
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black26,
-                                blurRadius: 8,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "Select Route",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                          // Routes list
+                          if (_isRoutePanelOpen)
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.alt_route,
+                                          color: Color(0xFF4D4DFF),
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          "Choose Your Route",
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Expanded(
+                                      child: ListView.builder(
+                                        itemCount: _routes.length,
+                                        itemBuilder: (context, i) {
+                                          bool isSelected =
+                                              i == _selectedRouteIndex;
+                                          return Container(
+                                            margin: EdgeInsets.only(bottom: 8),
+                                            decoration: BoxDecoration(
+                                              color: isSelected
+                                                  ? Color(
+                                                      0xFF4D4DFF,
+                                                    ).withOpacity(0.2)
+                                                  : Color(0xFF1a1a1e),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: isSelected
+                                                    ? Color(0xFF4D4DFF)
+                                                    : Colors.transparent,
+                                                width: 2,
+                                              ),
+                                            ),
+                                            child: ListTile(
+                                              leading: Container(
+                                                padding: EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: [
+                                                    Color(0xFF4D4DFF),
+                                                    Color.fromARGB(
+                                                      255,
+                                                      123,
+                                                      0,
+                                                      230,
+                                                    ),
+                                                    Color.fromARGB(
+                                                      255,
+                                                      255,
+                                                      0,
+                                                      212,
+                                                    ),
+                                                  ][i],
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: Icon(
+                                                  Icons.directions_car,
+                                                  color: Colors.white,
+                                                  size: 24,
+                                                ),
+                                              ),
+                                              title: Text(
+                                                "Route ${i + 1}",
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              subtitle: Text(
+                                                "${_routeDistances[i].toStringAsFixed(1)} km • "
+                                                "${_routeDurations[i].toStringAsFixed(0)} min",
+                                                style: TextStyle(
+                                                  color: Color(0xFF4D4DFF),
+                                                ),
+                                              ),
+                                              trailing: isSelected
+                                                  ? Icon(
+                                                      Icons.check_circle,
+                                                      color: Color(0xFF4D4DFF),
+                                                    )
+                                                  : null,
+                                              onTap: () {
+                                                _followUser = false;
+                                                _highlightRoute(i);
+                                                _mapController.fitCamera(
+                                                  CameraFit.bounds(
+                                                    bounds:
+                                                        LatLngBounds.fromPoints(
+                                                          _routes[i],
+                                                        ),
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                          60,
+                                                        ),
+                                                  ),
+                                                );
+                                                setState(() {
+                                                  _isRoutePanelOpen = false;
+                                                });
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              SizedBox(height: 8),
-                              // Display route options with distance/duration
-                              for (int i = 0; i < _routes.length; i++)
-                                ListTile(
-                                  leading: Icon(
-                                    Icons.directions,
-                                    color: [
-                                      Colors.blue,
-                                      Colors.green,
-                                      Colors.orange,
-                                    ][i],
-                                  ),
-                                  title: Text("Route ${i + 1}"),
-                                  subtitle: Text(
-                                    "${_routeDistances[i].toStringAsFixed(1)} km • ${_routeDurations[i].toStringAsFixed(0)} min",
-                                  ),
-                                  textColor: Colors.white,
-                                  onTap: () {
-                                    // Highlight selected route
-                                    _highlightRoute(i);
-                                  },
-                                ),
-                            ],
-                          ),
-                        )
-                      : SizedBox.shrink(),
-                ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
-      floatingActionButton: FloatingActionButton(
-        elevation: 0,
-        onPressed: _userCurrentLocation,
-        backgroundColor: const Color(0xFF4D4DFF),
-        child: const Icon(Icons.my_location, size: 30, color: Colors.white),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Color(0xFF4D4DFF).withOpacity(0.5),
+              blurRadius: 15,
+              spreadRadius: 3,
+            ),
+          ],
+        ),
+        child: FloatingActionButton(
+          elevation: 0,
+          onPressed: () {
+            _followUser = true;
+            _userCurrentLocation();
+          },
+          backgroundColor: const Color(0xFF4D4DFF),
+          child: const Icon(Icons.my_location, size: 28, color: Colors.white),
+        ),
       ),
     );
   }

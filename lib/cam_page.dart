@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 class Mycam extends StatefulWidget {
   const Mycam({super.key});
@@ -26,15 +27,15 @@ final TextEditingController cityController = TextEditingController();
 
 class _MycamState extends State<Mycam> {
   Timer? _frameTimer;
-  Timer? _backendTimer;
   CameraController? _cameraController;
   late List<CameraDescription> _cameras;
-  bool _isCameraReady = false;
   bool _isDetecting = false;
-  bool _isCapturing = false;
-
+  bool _isProcessing = false; // Track if frame is being processed
+  // ignore: unused_field
+  bool _isCameraReady = false;
   double trafficLevel = 0.0;
   String trafficStatus = "Unknown";
+  DateTime? lastUpdateTime; // Track when we last got data
   final String baseUrl = "https://aetheris-backend-h4xm.onrender.com";
 
   @override
@@ -59,30 +60,10 @@ class _MycamState extends State<Mycam> {
     }
   }
 
-  Future<void> fetchTrafficStatus() async {
-    try {
-      final res = await http.get(Uri.parse("$baseUrl/status"));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (mounted) {
-          setState(() {
-            trafficLevel = (data["traffic_level"] ?? 0).toDouble();
-            trafficStatus = data["traffic_status"] ?? "Unknown";
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("❌ Status fetch error: $e");
-    }
-  }
-
   Future<void> startDetection() async {
     if (_isDetecting) return;
 
     _frameTimer?.cancel();
-    _backendTimer?.cancel();
-
     setState(() => _isDetecting = true);
 
     try {
@@ -91,32 +72,13 @@ class _MycamState extends State<Mycam> {
       debugPrint("❌ Start detection error: $e");
     }
 
-    // Fetch traffic status every 2 seconds
-    _backendTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => fetchTrafficStatus(),
-    );
-
-    // Send frame every 5 seconds
-    _frameTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      if (!_isDetecting || _isCapturing || !mounted) return;
-
-      final controller = _cameraController;
-      if (controller == null || !controller.value.isInitialized) return;
-      if (controller.value.isTakingPicture) return;
-
-      _isCapturing = true;
-
-      try {
-        final XFile file = await controller.takePicture();
-        final Uint8List bytes = await file.readAsBytes();
-        await sendFrame(bytes);
-      } catch (e) {
-        debugPrint("❌ Capture error: $e");
-      } finally {
-        _isCapturing = false;
-      }
+    // Send frame every 3 seconds (reduced from 5 for better responsiveness)
+    _frameTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      await _captureAndSendFrame();
     });
+
+    // Send first frame immediately
+    _captureAndSendFrame();
   }
 
   Future<void> stopDetection() async {
@@ -125,9 +87,7 @@ class _MycamState extends State<Mycam> {
     setState(() => _isDetecting = false);
 
     _frameTimer?.cancel();
-    _backendTimer?.cancel();
     _frameTimer = null;
-    _backendTimer = null;
 
     try {
       await http.post(Uri.parse("$baseUrl/stop-detection"));
@@ -136,7 +96,29 @@ class _MycamState extends State<Mycam> {
     }
   }
 
-  Future<void> sendFrame(Uint8List imageBytes) async {
+  Future<void> _captureAndSendFrame() async {
+    if (!_isDetecting || _isProcessing || !mounted) return;
+
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (controller.value.isTakingPicture) return;
+
+    setState(() => _isProcessing = true);
+
+    try {
+      final XFile file = await controller.takePicture();
+      final Uint8List bytes = await file.readAsBytes();
+      await sendFrameAndGetStatus(bytes);
+    } catch (e) {
+      debugPrint("❌ Capture error: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  Future<void> sendFrameAndGetStatus(Uint8List imageBytes) async {
     try {
       final request = http.MultipartRequest(
         "POST",
@@ -152,8 +134,32 @@ class _MycamState extends State<Mycam> {
         ),
       );
 
-      await request.send();
-      debugPrint("📤 Frame sent successfully");
+      // IMPORTANT: Wait for response and parse it
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 15), // Add timeout
+        onTimeout: () {
+          throw TimeoutException('Frame processing took too long');
+        },
+      );
+
+      if (streamedResponse.statusCode == 200) {
+        final responseBody = await streamedResponse.stream.bytesToString();
+        final data = jsonDecode(responseBody);
+
+        if (mounted) {
+          setState(() {
+            trafficLevel = (data["traffic_level"] ?? 0).toDouble();
+            trafficStatus = data["traffic_status"] ?? "Unknown";
+            lastUpdateTime = DateTime.now();
+          });
+        }
+        debugPrint("✅ Frame processed: $trafficStatus ($trafficLevel)");
+      } else {
+        debugPrint("❌ Server error: ${streamedResponse.statusCode}");
+      }
+    } on TimeoutException catch (e) {
+      debugPrint("⏱️ Timeout: $e");
+      // Optionally show "Processing..." state to user
     } catch (e) {
       debugPrint("❌ Error sending frame: $e");
     }
@@ -163,7 +169,6 @@ class _MycamState extends State<Mycam> {
   void dispose() {
     _isDetecting = false;
     _frameTimer?.cancel();
-    _backendTimer?.cancel();
     _cameraController?.dispose();
     super.dispose();
   }
@@ -190,17 +195,48 @@ class _MycamState extends State<Mycam> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(18),
-                child: _isCameraReady
-                    ? CameraPreview(_cameraController!)
-                    : const Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF4D4DFF),
-                        ),
-                      ),
+                child: ModelViewer(
+                  backgroundColor: Color(0xFF0A0A0E),
+                  src: 'images/cybertruck.glb',
+                  alt: 'My 3d model',
+                  autoRotate: true,
+                  autoRotateDelay: 0, // Start rotating immediately (no delay)
+                  cameraControls: true,
+                  disableZoom: true,
+                  maxCameraOrbit:
+                      "auto 90deg auto", // Lock vertical angle at 90deg
+                  minCameraOrbit: "auto 90deg auto",
+                  shadowIntensity: 0.7,
+                  shadowSoftness: 0.8,
+                ),
               ),
             ),
 
             SizedBox(height: 20),
+
+            // Processing indicator
+            if (_isProcessing)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF4D4DFF),
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      "Processing...",
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
 
             // Traffic Level Display
             Text(
@@ -216,43 +252,82 @@ class _MycamState extends State<Mycam> {
               style: const TextStyle(fontSize: 18, color: Colors.white),
             ),
 
+            // Show last update time
+            if (lastUpdateTime != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  "Updated ${_getTimeAgo(lastUpdateTime!)}",
+                  style: const TextStyle(fontSize: 12, color: Colors.white54),
+                ),
+              ),
+
             SizedBox(height: MediaQuery.of(context).size.width * 0.1),
 
-            // Control Buttons
-            Container(
-              height: MediaQuery.of(context).size.height * 0.2,
-              width: MediaQuery.of(context).size.width * 0.9,
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(173, 160, 160, 160),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF4D4DFF), width: 2),
+            // Power Button
+            GestureDetector(
+              onTap: () {
+                if (_isDetecting) {
+                  stopDetection();
+                } else {
+                  startDetection();
+                }
+              },
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(0xFF0A0A0E),
+                  border: Border.all(color: Color(0xFF4D4DFF), width: 3),
+                  boxShadow: _isDetecting
+                      ? [
+                          BoxShadow(
+                            color: Color(0xFF4D4DFF).withOpacity(0.6),
+                            blurRadius: 20,
+                            spreadRadius: 5,
+                          ),
+                          BoxShadow(
+                            color: Color(0xFF4D4DFF).withOpacity(0.3),
+                            blurRadius: 40,
+                            spreadRadius: 10,
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.power_settings_new,
+                    size: 50,
+                    color: _isDetecting ? Color(0xFF4D4DFF) : Colors.white54,
+                  ),
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isDetecting ? null : startDetection,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      disabledBackgroundColor: Colors.grey,
-                    ),
-                    child: const Text("START"),
-                  ),
-                  ElevatedButton(
-                    onPressed: _isDetecting ? stopDetection : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      disabledBackgroundColor: Colors.grey,
-                    ),
-                    child: const Text("STOP"),
-                  ),
-                ],
+            ),
+
+            SizedBox(height: 12),
+
+            // Status Text
+            Text(
+              _isDetecting ? "ACTIVE" : "INACTIVE",
+              style: TextStyle(
+                color: _isDetecting ? Color(0xFF4D4DFF) : Colors.white54,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2,
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _getTimeAgo(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inSeconds < 5) return "just now";
+    if (diff.inSeconds < 60) return "${diff.inSeconds}s ago";
+    return "${diff.inMinutes}m ago";
   }
 }
 
@@ -277,7 +352,7 @@ class _BottomBarState extends State<BottomBar> {
   final List<Widget> ScreenList = [
     const Mycam(),
     const MapPage(),
-    const SettingsPage(),
+    const MyactivityPage(),
     const ProfilePage(),
   ];
 
@@ -334,9 +409,9 @@ class _BottomBarState extends State<BottomBar> {
                   label: 'Map',
                 ),
                 BottomNavigationBarItem(
-                  icon: Icon(Icons.settings_outlined),
-                  activeIcon: Icon(Icons.settings),
-                  label: 'Settings',
+                  icon: Icon(Icons.bar_chart_outlined),
+                  activeIcon: Icon(Icons.bar_chart),
+                  label: 'My activity',
                 ),
                 BottomNavigationBarItem(
                   icon: Icon(Icons.person_outline),
@@ -352,14 +427,14 @@ class _BottomBarState extends State<BottomBar> {
   }
 }
 
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+class MyactivityPage extends StatefulWidget {
+  const MyactivityPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  State<MyactivityPage> createState() => _MyactivityPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _MyactivityPageState extends State<MyactivityPage> {
   final int numberOfContainers = 5;
   final List<String> myTexts = [
     "Privacy",
