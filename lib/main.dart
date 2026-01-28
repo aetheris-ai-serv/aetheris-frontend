@@ -341,7 +341,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
                       TextField(
                         controller: email,
-                        style: TextStyle(color: Colors.transparent),
+                        style: TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hint: Text(
                             'Email',
