@@ -6,6 +6,7 @@ import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:location/location.dart';
 import 'package:http/http.dart' as http;
+import 'dart:ui'; // ✅ Add this for BackdropFilter
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -33,10 +34,32 @@ class _MapPageState extends State<MapPage> {
   bool _isRoutePanelOpen = false;
   bool _followUser = true;
 
+  // ✅ Last ride data
+  double lastRideTopSpeed = 0.0; // km/h
+  double lastRideDistance = 0.0; // km
+  List<LatLng> lastRidePath = []; // Path points for mini diagram
+
   @override
   void initState() {
     super.initState();
     _initializeLocation();
+    _loadLastRideData();
+  }
+
+  Future<void> _loadLastRideData() async {
+    // For now, using dummy data. Replace with SharedPreferences in production
+    setState(() {
+      lastRideTopSpeed = 65.5; // km/h
+      lastRideDistance = 12.3; // km
+      // Sample path (replace with actual saved path)
+      lastRidePath = [
+        LatLng(28.6139, 77.2090),
+        LatLng(28.6149, 77.2100),
+        LatLng(28.6159, 77.2110),
+        LatLng(28.6169, 77.2120),
+        LatLng(28.6179, 77.2130),
+      ];
+    });
   }
 
   LatLng _smoothLocation(LatLng newPoint) {
@@ -126,7 +149,6 @@ class _MapPageState extends State<MapPage> {
         """;
 
     final url = Uri.parse("https://overpass-api.de/api/interpreter");
-
     try {
       final response = await http.post(url, body: {"data": query});
 
@@ -512,6 +534,106 @@ class _MapPageState extends State<MapPage> {
                   ),
                 ),
 
+                // ✅ LAST RIDE DETAILS - GLASSMORPHISM CARD (LEFT SIDE)
+                // ✅ LAST RIDE DETAILS - EXACT DESIGN FROM YOUR SCREENSHOT
+                Positioned(
+                  left: 16,
+                  top: MediaQuery.of(context).padding.top + 120,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        width: 100, // Narrower like your design
+                        height: 320,
+                        padding: EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Color(
+                            0xFF1a2332,
+                          ).withOpacity(0.8), // Dark blue-gray background
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // "Last ride" text
+                            Text(
+                              "Last ride",
+                              style: TextStyle(
+                                color: Color(0xFF6B9FD8), // Light blue color
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+
+                            SizedBox(height: 6),
+
+                            // Path diagram image
+                            Image.asset(
+                              'images/path.png',
+                              height: 120,
+                              fit: BoxFit.contain,
+                            ),
+
+                            SizedBox(height: 6),
+
+                            // "km" text
+                            Text(
+                              "km",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                              ),
+                            ),
+
+                            SizedBox(height: 4),
+
+                            // Distance number "8.73"
+                            Text(
+                              lastRideDistance.toStringAsFixed(
+                                2,
+                              ), // Shows like "8.73"
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            SizedBox(height: 15),
+                            Text(
+                              "Top speed",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                              ),
+                            ),
+
+                            SizedBox(height: 4),
+                            Text(
+                              lastRideTopSpeed.toStringAsFixed(
+                                2,
+                              ), // Shows like "8.73"
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 // 🔍 SEARCH BAR
                 Positioned(
                   top: 50,

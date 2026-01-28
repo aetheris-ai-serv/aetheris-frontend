@@ -4,6 +4,7 @@ import 'package:demo/map_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/speed_service.dart';
@@ -13,6 +14,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'package:image/image.dart' as img;
 
 class Mycam extends StatefulWidget {
   const Mycam({super.key});
@@ -38,10 +40,101 @@ class _MycamState extends State<Mycam> {
   DateTime? lastUpdateTime; // Track when we last got data
   final String baseUrl = "https://aetheris-backend-h4xm.onrender.com";
 
+  // Weather data
+  String weatherTemp = "--";
+  String weatherCondition = "";
+  String weatherIcon = "01d";
+  bool isLoadingWeather = true;
+
   @override
   void initState() {
     super.initState();
+    _requestPermissions();
     _initCamera();
+    _fetchWeather();
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request both camera and location at once
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.camera,
+      Permission.location,
+    ].request();
+
+    if (statuses[Permission.camera]!.isDenied) {
+      debugPrint("❌ Camera permission denied");
+    }
+
+    if (statuses[Permission.location]!.isDenied) {
+      debugPrint("❌ Location permission denied");
+    }
+
+    if (statuses[Permission.camera]!.isGranted &&
+        statuses[Permission.location]!.isGranted) {
+      debugPrint("✅ All permissions granted");
+    }
+  }
+
+  Future<void> _fetchWeather() async {
+    debugPrint("🌤️ Starting weather fetch...");
+    setState(() => isLoadingWeather = true);
+
+    try {
+      // Replace with your actual API key
+      const String apiKey = "b847eef03184152349512d25fdc2f8b6";
+
+      // Using OpenWeatherMap API
+      final url =
+          "https://api.openweathermap.org/data/2.5/weather?q=New Delhi,IN&appid=$apiKey&units=metric";
+      debugPrint("🌐 Fetching from: $url");
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(Duration(seconds: 10));
+
+      debugPrint("📡 Response status: ${response.statusCode}");
+      debugPrint("📄 Response body: ${response.body}");
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (mounted) {
+          setState(() {
+            weatherTemp = "${data['main']['temp'].round()}°C";
+            weatherCondition = data['weather'][0]['main'] ?? "Clear";
+            weatherIcon = data['weather'][0]['icon'] ?? "01d";
+            isLoadingWeather = false;
+          });
+        }
+        debugPrint("✅ Weather fetched: $weatherTemp, $weatherCondition");
+      } else {
+        debugPrint("❌ Weather API error: ${response.statusCode}");
+        if (mounted) {
+          setState(() {
+            weatherTemp = "--°C";
+            weatherCondition = "N/A";
+            isLoadingWeather = false;
+          });
+        }
+      }
+    } on TimeoutException catch (e) {
+      debugPrint("⏱️ Weather timeout: $e");
+      if (mounted) {
+        setState(() {
+          weatherTemp = "--°C";
+          weatherCondition = "Timeout";
+          isLoadingWeather = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Weather fetch error: $e");
+      if (mounted) {
+        setState(() {
+          weatherTemp = "--°C";
+          weatherCondition = "Error";
+          isLoadingWeather = false;
+        });
+      }
+    }
   }
 
   Future<void> _initCamera() async {
@@ -120,6 +213,20 @@ class _MycamState extends State<Mycam> {
 
   Future<void> sendFrameAndGetStatus(Uint8List imageBytes) async {
     try {
+      // Resize image before sending
+      img.Image? originalImage = img.decodeImage(imageBytes);
+      if (originalImage != null) {
+        // Resize to smaller dimensions (adjust based on your backend needs)
+        img.Image resizedImage = img.copyResize(
+          originalImage,
+          width: 640, // smaller size for backend
+        );
+        final resizedBytes = Uint8List.fromList(
+          img.encodeJpg(resizedImage, quality: 85),
+        );
+        imageBytes = resizedBytes; // use resized bytes
+      }
+
       final request = http.MultipartRequest(
         "POST",
         Uri.parse("$baseUrl/frame"),
@@ -128,15 +235,14 @@ class _MycamState extends State<Mycam> {
       request.files.add(
         http.MultipartFile.fromBytes(
           "file",
-          imageBytes,
+          imageBytes, // now sending smaller image
           filename: "frame.jpg",
           contentType: MediaType("image", "jpeg"),
         ),
       );
 
-      // IMPORTANT: Wait for response and parse it
       final streamedResponse = await request.send().timeout(
-        const Duration(seconds: 15), // Add timeout
+        const Duration(seconds: 15),
         onTimeout: () {
           throw TimeoutException('Frame processing took too long');
         },
@@ -159,7 +265,6 @@ class _MycamState extends State<Mycam> {
       }
     } on TimeoutException catch (e) {
       debugPrint("⏱️ Timeout: $e");
-      // Optionally show "Processing..." state to user
     } catch (e) {
       debugPrint("❌ Error sending frame: $e");
     }
@@ -176,149 +281,284 @@ class _MycamState extends State<Mycam> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
-        child: Column(
-          children: [
-            SizedBox(height: MediaQuery.of(context).size.height * 0.01),
-
-            // Camera Preview
-            Container(
-              height: MediaQuery.of(context).size.height * 0.5,
-              width: MediaQuery.of(context).size.width * 0.9,
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(173, 160, 160, 160),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF4D4DFF), width: 2),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: ModelViewer(
-                  backgroundColor: Color(0xFF0A0A0E),
-                  src: 'images/cybertruck.glb',
-                  alt: 'My 3d model',
-                  autoRotate: true,
-                  autoRotateDelay: 0, // Start rotating immediately (no delay)
-                  cameraControls: true,
-                  disableZoom: true,
-                  maxCameraOrbit:
-                      "auto 90deg auto", // Lock vertical angle at 90deg
-                  minCameraOrbit: "auto 90deg auto",
-                  shadowIntensity: 0.7,
-                  shadowSoftness: 0.8,
-                ),
-              ),
-            ),
-
-            SizedBox(height: 20),
-
-            // Processing indicator
-            if (_isProcessing)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
+      body: Stack(
+        children: [
+          // Full Screen Camera Preview (Background)
+          Positioned.fill(
+            child:
+                _cameraController != null &&
+                    _cameraController!.value.isInitialized
+                ? FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _cameraController!.value.previewSize!.height,
+                      height: _cameraController!.value.previewSize!.width,
+                      child: CameraPreview(_cameraController!),
+                    ),
+                  )
+                : Container(
+                    color: Color(0xFF0A0A0E),
+                    child: Center(
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
                         color: Color(0xFF4D4DFF),
                       ),
                     ),
-                    SizedBox(width: 8),
-                    Text(
-                      "Processing...",
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+          ),
+
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 16,
+            right: 16,
+            child: GestureDetector(
+              onTap: _fetchWeather, // Tap to refresh weather
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Color(0xFF0A0A0E).withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Color(0xFF4D4DFF), width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFF4D4DFF).withOpacity(0.3),
+                      blurRadius: 10,
+                      spreadRadius: 2,
                     ),
                   ],
                 ),
-              ),
-
-            // Traffic Level Display
-            Text(
-              "Traffic Level: ${trafficLevel.toStringAsFixed(1)}",
-              style: TextStyle(
-                color: trafficLevel > 7 ? Colors.red : Colors.green,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
+                child: isLoadingWeather
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFF4D4DFF),
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Weather Icon
+                          weatherIcon.isNotEmpty
+                              ? Image.network(
+                                  "https://openweathermap.org/img/wn/$weatherIcon@2x.png",
+                                  width: 40,
+                                  height: 40,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Icon(
+                                      Icons.wb_sunny,
+                                      color: Colors.white,
+                                      size: 28,
+                                    );
+                                  },
+                                )
+                              : Icon(
+                                  Icons.wb_sunny,
+                                  color: Colors.white,
+                                  size: 28,
+                                ),
+                          SizedBox(width: 8),
+                          // Temperature and Condition
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                weatherTemp,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (weatherCondition.isNotEmpty)
+                                SizedBox(
+                                  width: 80, // Limit width to prevent overflow
+                                  child: Text(
+                                    weatherCondition,
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
               ),
             ),
-            Text(
-              trafficStatus,
-              style: const TextStyle(fontSize: 18, color: Colors.white),
-            ),
-
-            // Show last update time
-            if (lastUpdateTime != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Text(
-                  "Updated ${_getTimeAgo(lastUpdateTime!)}",
-                  style: const TextStyle(fontSize: 12, color: Colors.white54),
+          ),
+          // Overlay Container with Controls
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Color(0xFF0A0A0E).withOpacity(0.95),
+                    Color(0xFF0A0A0E).withOpacity(0.8),
+                    Color(0xFF0A0A0E).withOpacity(0.0),
+                  ],
                 ),
               ),
-
-            SizedBox(height: MediaQuery.of(context).size.width * 0.1),
-
-            // Power Button
-            GestureDetector(
-              onTap: () {
-                if (_isDetecting) {
-                  stopDetection();
-                } else {
-                  startDetection();
-                }
-              },
-              child: Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFF0A0A0E),
-                  border: Border.all(color: Color(0xFF4D4DFF), width: 3),
-                  boxShadow: _isDetecting
-                      ? [
-                          BoxShadow(
-                            color: Color(0xFF4D4DFF).withOpacity(0.6),
-                            blurRadius: 20,
-                            spreadRadius: 5,
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).padding.bottom + 20,
+                top: 40,
+                left: 20,
+                right: 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Processing indicator
+                  if (_isProcessing)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF4D4DFF),
+                            ),
                           ),
-                          BoxShadow(
-                            color: Color(0xFF4D4DFF).withOpacity(0.3),
-                            blurRadius: 40,
-                            spreadRadius: 10,
+                          SizedBox(width: 8),
+                          Text(
+                            "Processing...",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
                           ),
-                        ]
-                      : [],
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.power_settings_new,
-                    size: 50,
-                    color: _isDetecting ? Color(0xFF4D4DFF) : Colors.white54,
+                        ],
+                      ),
+                    ),
+
+                  // Traffic Info Card
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            width: 1.5,
+                            color: Colors.white.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              "Traffic Level: ${trafficLevel.toStringAsFixed(1)}",
+                              style: TextStyle(
+                                color: trafficLevel > 7
+                                    ? Colors.red
+                                    : Colors.green,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              trafficStatus,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                            if (lastUpdateTime != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(
+                                  "Updated ${_getTimeAgo(lastUpdateTime!)}",
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  SizedBox(height: 24),
+
+                  // Power Button
+                  GestureDetector(
+                    onTap: () {
+                      if (_isDetecting) {
+                        stopDetection();
+                      } else {
+                        startDetection();
+                      }
+                    },
+                    child: Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF0A0A0E),
+                        border: Border.all(color: Color(0xFF4D4DFF), width: 3),
+                        boxShadow: _isDetecting
+                            ? [
+                                BoxShadow(
+                                  color: Color(0xFF4D4DFF).withOpacity(0.6),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                                BoxShadow(
+                                  color: Color(0xFF4D4DFF).withOpacity(0.3),
+                                  blurRadius: 40,
+                                  spreadRadius: 10,
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Center(
+                        child: Icon(
+                          Icons.power_settings_new,
+                          size: 50,
+                          color: _isDetecting
+                              ? Color(0xFF4D4DFF)
+                              : Colors.white54,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  SizedBox(height: 12),
+
+                  // Status Text
+                  Text(
+                    _isDetecting ? "ACTIVE" : "INACTIVE",
+                    style: TextStyle(
+                      color: _isDetecting ? Color(0xFF4D4DFF) : Colors.white54,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ],
               ),
             ),
-
-            SizedBox(height: 12),
-
-            // Status Text
-            Text(
-              _isDetecting ? "ACTIVE" : "INACTIVE",
-              style: TextStyle(
-                color: _isDetecting ? Color(0xFF4D4DFF) : Colors.white54,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 2,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -344,7 +584,6 @@ class _BottomBarState extends State<BottomBar> {
   @override
   void initState() {
     super.initState();
-
     // 🔥 START SPEED TRACKING WHEN APP OPENS
     SpeedService().start();
   }
@@ -435,47 +674,45 @@ class MyactivityPage extends StatefulWidget {
 }
 
 class _MyactivityPageState extends State<MyactivityPage> {
-  final int numberOfContainers = 5;
-  final List<String> myTexts = [
-    "Privacy",
-    "Notifications",
-    "About and Support",
-  ];
-
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Scaffold(
-        // backgroundColor: Colors.transparent,
         body: Container(
           width: double.infinity,
           height: double.infinity,
-
           decoration: BoxDecoration(color: Color(0xFF0A0A0E)),
-          child: ListView.builder(
-            itemCount: myTexts.length,
-            itemBuilder: (context, index) {
-              return Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Center(
-                    child: Text(
-                      myTexts[index],
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF4D4DFF),
-                      ),
-                    ),
-                  ),
+          child: Align(
+            // Use Align instead of Center
+            alignment: Alignment.topCenter, // Position at top
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.5,
+              width: MediaQuery.of(context).size.width * 0.9,
+              decoration: BoxDecoration(
+                color: const Color.fromARGB(173, 160, 160, 160),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF4D4DFF), width: 2),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: ModelViewer(
+                  backgroundColor: Color(0xFF0A0A0E),
+                  src: 'images/cybertruck.glb',
+                  alt: 'My 3d model',
+                  cameraOrbit: "90deg 60deg 50%",
+                  cameraTarget: "0m 1.2m 0m",
+                  autoRotate: true,
+                  autoRotateDelay: 0,
+                  cameraControls: true,
+                  disableZoom: true,
+                  maxCameraOrbit: "auto 75deg auto",
+                  minCameraOrbit: "auto 75deg auto",
+                  shadowIntensity: 0.7,
+                  shadowSoftness: 0.8,
+                  interactionPrompt: InteractionPrompt.none,
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
       ),
@@ -613,43 +850,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   // Second inner container
                   SizedBox(height: 20),
-                  GlassContainer2(
-                    vwidth: 400,
-                    vheight: 100,
-                    vchild: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        // Top text
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            top: 10.0,
-                            left: 20,
-                            right: 20,
-                          ),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Text(
-                                  "Driving details",
-                                  style: TextStyle(
-                                    fontSize: 38,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                SizedBox(height: 20),
-
-                                Container(),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 30),
                   ElevatedButton.icon(
                     onPressed: () => logout(context),
                     style: ElevatedButton.styleFrom(
@@ -674,38 +874,4 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-class GlassContainer2 extends StatelessWidget {
-  final Widget vchild;
-  final double vwidth;
-  final double vheight;
 
-  const GlassContainer2({
-    super.key,
-    required this.vwidth,
-    required this.vheight,
-    required this.vchild,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaY: 10, sigmaX: 10),
-        child: Container(
-          width: vwidth,
-          height: vheight,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              width: 1.5,
-              color: Colors.white.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Center(child: vchild),
-        ),
-      ),
-    );
-  }
-}
