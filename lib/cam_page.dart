@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ui';
 import 'package:demo/map_page.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -38,8 +37,8 @@ class _MycamState extends State<Mycam> {
   double trafficLevel = 0.0;
   String trafficStatus = "Unknown";
   DateTime? lastUpdateTime; // Track when we last got data
-  final String baseUrl = "https://aetheris-backend-h4xm.onrender.com";
-
+  final String baseUrl = "http://192.168.0.5:8000";
+  String? user_id;
   // Weather data
   String weatherTemp = "--";
   String weatherCondition = "";
@@ -158,7 +157,7 @@ class _MycamState extends State<Mycam> {
 
     _frameTimer?.cancel();
     setState(() => _isDetecting = true);
-
+    SpeedService().start();
     try {
       await http.post(Uri.parse("$baseUrl/start-detection"));
     } catch (e) {
@@ -178,7 +177,7 @@ class _MycamState extends State<Mycam> {
     if (!_isDetecting) return;
 
     setState(() => _isDetecting = false);
-
+    SpeedService().stop();
     _frameTimer?.cancel();
     _frameTimer = null;
 
@@ -240,6 +239,11 @@ class _MycamState extends State<Mycam> {
           contentType: MediaType("image", "jpeg"),
         ),
       );
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        user_id = prefs.getString('user_id');
+      });
+      request.fields['user_id'] = user_id!; // IMPORTANT
 
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 15),
@@ -584,15 +588,13 @@ class _BottomBarState extends State<BottomBar> {
   @override
   void initState() {
     super.initState();
-    // 🔥 START SPEED TRACKING WHEN APP OPENS
-    SpeedService().start();
   }
 
   final List<Widget> ScreenList = [
     const Mycam(),
     const MapPage(),
     const MyactivityPage(),
-    const ProfilePage(),
+    // const ProfilePage(),
   ];
 
   @override
@@ -730,15 +732,24 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   File? _image; // store picked image
   final ImagePicker _picker = ImagePicker();
-  User? user;
-  String? uid;
+  String? email; // now coming from SharedPreferences
+  String? token; // stored JWT token
+  String? uid; // user ID or email for display
 
   @override
   void initState() {
     super.initState();
-    user = FirebaseAuth.instance.currentUser;
-    uid = user?.email; // safe null-check
+    _loadUserData();
     _loadImage();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      email = prefs.getString('email');
+      token = prefs.getString('token');
+      uid = prefs.getString('user_id'); // using email as uid for display
+    });
   }
 
   // Load saved image path
@@ -752,10 +763,10 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // Logout (MongoDB version)
   Future<void> logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut(); // sign out from Firebase
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // clear login data
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear(); // clear token + email + image
 
     Navigator.pushReplacementNamed(context, '/login');
   }
@@ -873,5 +884,3 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
-
-

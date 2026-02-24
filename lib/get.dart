@@ -1,34 +1,14 @@
 import 'package:flutter/material.dart';
-import 'main.dart';
 import 'dart:ui';
 
+// =====================================================================
+// GET STARTED — Onboarding/Splash Screen
+// =====================================================================
 class GetStarted extends StatefulWidget {
   const GetStarted({super.key});
 
   @override
   State<GetStarted> createState() => _getStartedState();
-}
-
-class Myapp extends StatelessWidget {
-  const Myapp({super.key});
-
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      // home: const MyHomePage(title: 'Flutter Demo Home Page'),
-      initialRoute: '/get started',
-      routes: {
-        '/get started': (context) => GetStarted(),
-        '/sign up': (context) => MyHomePage(title: 'Hello World'),
-      },
-    );
-  }
 }
 
 class _getStartedState extends State<GetStarted> {
@@ -102,7 +82,7 @@ class _getStartedState extends State<GetStarted> {
                               style: TextStyle(
                                 fontSize:
                                     MediaQuery.of(context).size.height * 0.068,
-                                color: Colors.redAccent, // bluish accent
+                                color: Colors.redAccent,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 1.5,
                               ),
@@ -129,7 +109,8 @@ class _getStartedState extends State<GetStarted> {
                           ),
                         ),
                         onPressed: () {
-                          Navigator.pushReplacementNamed(context, '/sign up');
+                          // Goes to Login page
+                          Navigator.pushReplacementNamed(context, '/login');
                         },
                         child: const Text(
                           "Get started",
@@ -148,6 +129,9 @@ class _getStartedState extends State<GetStarted> {
   }
 }
 
+// =====================================================================
+// GLASS CONTAINER — Reusable glassmorphism widget
+// =====================================================================
 class GlassContainer extends StatelessWidget {
   final Widget vchild;
   final double vwidth;

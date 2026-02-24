@@ -3,24 +3,25 @@ import 'package:demo/map_page.dart';
 import 'dart:async';
 import 'get.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// ===================== API URL =====================
+// Android emulator:  http://10.0.2.2:8000
+// iOS simulator:     http://localhost:8000
+// Real device:       http://YOUR_COMPUTER_IP:8000
+const String BASE_URL = 'http://192.168.0.5:8000';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // ❌ REMOVED: Firebase.initializeApp — no longer needed
 
   SharedPreferences prefs = await SharedPreferences.getInstance();
   bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
 
   runApp(MyApp(isLoggedIn: isLoggedIn));
 }
-
-final TextEditingController nameController = TextEditingController();
-final TextEditingController ageController = TextEditingController();
-final TextEditingController cityController = TextEditingController();
 
 class MyApp extends StatelessWidget {
   final bool isLoggedIn;
@@ -34,7 +35,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      initialRoute: isLoggedIn ? '/home' : '/get started', // ✅ check here
+      initialRoute: isLoggedIn ? '/home' : '/get started',
       routes: {
         '/get started': (context) => GetStarted(),
         '/sign up': (context) => MyHomePage(title: 'Hello World'),
@@ -46,6 +47,9 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// =====================================================================
+// LOGIN PAGE
+// =====================================================================
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -57,10 +61,18 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController email = TextEditingController();
   final TextEditingController pass = TextEditingController();
   bool visib = false;
-  // 🔹 Sign In method
+  bool isLoading = false;
+
+  @override
+  void dispose() {
+    email.dispose();
+    pass.dispose();
+    super.dispose();
+  }
+
+  // 🔹 Sign In — calls POST /auth/login on FastAPI
   Future<void> signIn() async {
     if (email.text.isEmpty || pass.text.isEmpty) {
-      // Show warning if fields are empty
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Please enter both email and password"),
@@ -68,46 +80,60 @@ class _LoginPageState extends State<LoginPage> {
           duration: Duration(seconds: 2),
         ),
       );
-      return; // stop further execution
+      return;
     }
+
+    setState(() => isLoading = true);
+
     try {
-      UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
-            email: email.text.trim(),
-            password: pass.text.trim(),
-          );
-      print("User logged in: ${userCredential.user?.uid}");
+      final response = await http.post(
+        Uri.parse('$BASE_URL/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'email': email.text.trim(),
+          'password': pass.text.trim(),
+        }),
+      );
 
-      // ✅ Save login state
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('isLoggedIn', true);
-      await prefs.setString('uid', userCredential.user!.uid);
+      if (response.statusCode == 200) {
+        // ✅ Login successful
+        final data = json.decode(response.body);
+        print("User logged in: ${data['user_id']}");
 
-      Navigator.pushReplacementNamed(context, '/home');
+        // Save token + user info to SharedPreferences
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('token', data['token']);
+        await prefs.setString('user_id', data['user_id']);
+        await prefs.setString('email', data['email']);
+        await prefs.setString('name', data['name']);
+
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        // ❌ Login failed — show error from API
+        final error = json.decode(response.body);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error['detail'] ?? 'Login failed'),
+            backgroundColor: const Color.fromARGB(255, 54, 127, 244),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       print("Login error: $e");
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Login failed: $e")));
-    }
-  }
-
-  // 🔹 Sign Up method
-  Future<void> signUp() async {
-    try {
-      UserCredential userCredential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
-            email: email.text.trim(),
-            password: pass.text.trim(),
-          );
-      print("User registered: ${userCredential.user?.uid}");
-
-      Navigator.pushReplacementNamed(context, '/home');
-    } catch (e) {
-      print("Signup error: $e");
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Signup failed: $e")));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Connection error: $e"),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -125,7 +151,6 @@ class _LoginPageState extends State<LoginPage> {
         body: Container(
           width: MediaQuery.of(context).size.width,
           height: MediaQuery.of(context).size.height,
-          // color: LinearGradient(colors: [Colors.red,Colors.black]),
           color: Colors.transparent,
           padding: EdgeInsetsGeometry.symmetric(vertical: 20, horizontal: 10),
           child: Center(
@@ -153,6 +178,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       SizedBox(height: 20),
 
+                      // Email Field
                       TextField(
                         controller: email,
                         style: TextStyle(color: Colors.white),
@@ -185,6 +211,7 @@ class _LoginPageState extends State<LoginPage> {
 
                       SizedBox(height: 30),
 
+                      // Password Field
                       TextField(
                         controller: pass,
                         obscureText: visib,
@@ -225,11 +252,18 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       SizedBox(height: 30),
 
+                      // Sign In Button
                       ElevatedButton(
-                        onPressed: signIn,
+                        onPressed: isLoading ? null : signIn,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Color.fromRGBO(77, 77, 255, 1),
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: Color.fromRGBO(
+                            77,
+                            77,
+                            255,
+                            0.5,
+                          ),
                           minimumSize: Size(
                             MediaQuery.of(context).size.height * 0.9,
                             MediaQuery.of(context).size.width * 0.13,
@@ -238,9 +272,20 @@ class _LoginPageState extends State<LoginPage> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: Text('SignIn'),
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('SignIn'),
                       ),
                       SizedBox(height: 10),
+
+                      // Don't have an account? Register
                       Row(
                         children: [
                           Expanded(
@@ -283,6 +328,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
+// =====================================================================
+// REGISTER PAGE
+// =====================================================================
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
 
@@ -294,8 +342,98 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   bool visib = false;
+  bool isLoading = false;
+  TextEditingController name = TextEditingController();
   TextEditingController email = TextEditingController();
   TextEditingController pass = TextEditingController();
+
+  @override
+  void dispose() {
+    name.dispose();
+    email.dispose();
+    pass.dispose();
+    super.dispose();
+  }
+
+  // 🔹 Sign Up — calls POST /auth/register on FastAPI
+  Future<void> signUp() async {
+    if (name.text.isEmpty || email.text.isEmpty || pass.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please fill in all fields"),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    if (pass.text.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Password must be at least 6 characters"),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$BASE_URL/auth/signup'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'name': name.text.trim(),
+          'email': email.text.trim(),
+          'password': pass.text.trim(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        // ✅ Registration successful
+        final data = json.decode(response.body);
+        print("RESPONSE DATA: $data");
+        print("User registered: ${data['user_id']}");
+
+        // Save token + user info to SharedPreferences
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('token', data['token']);
+        await prefs.setString('user_id', data['user_id']);
+        await prefs.setString('email', data['email']);
+        await prefs.setString('name', data['name']);
+
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        // ❌ Registration failed
+        final error = json.decode(response.body);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error['detail'] ?? 'Registration failed'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print("Signup error: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Connection error: $e"),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -316,13 +454,12 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Center(
             child: GlassContainer(
               vwidth: MediaQuery.of(context).size.width * 0.85,
-              vheight: MediaQuery.of(context).size.height * 0.6,
+              vheight: MediaQuery.of(context).size.height * 0.65,
               vchild: Container(
                 decoration: BoxDecoration(
                   color: Colors.transparent,
                   borderRadius: BorderRadius.circular(30),
                 ),
-                // child: text,
                 child: Padding(
                   padding: EdgeInsetsGeometry.all(30),
                   child: Column(
@@ -339,6 +476,40 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                       SizedBox(height: 20),
 
+                      // Name Field (NEW — wasn't in original register)
+                      TextField(
+                        controller: name,
+                        style: TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hint: Text(
+                            'Full Name',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          prefixIcon: Icon(
+                            Icons.person_outlined,
+                            color: Colors.white,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            borderSide: BorderSide(
+                              color: const Color.fromARGB(255, 255, 255, 255),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            borderSide: BorderSide(
+                              color: Color.fromRGBO(77, 77, 255, 1),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      SizedBox(height: 20),
+
+                      // Email Field
                       TextField(
                         controller: email,
                         style: TextStyle(color: Colors.white),
@@ -369,8 +540,9 @@ class _MyHomePageState extends State<MyHomePage> {
                         ),
                       ),
 
-                      SizedBox(height: 30),
+                      SizedBox(height: 20),
 
+                      // Password Field
                       TextField(
                         controller: pass,
                         obscureText: visib,
@@ -411,39 +583,18 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                       SizedBox(height: 30),
 
+                      // Sign Up Button
                       ElevatedButton(
-                        onPressed: () async {
-                          if (email.text.isEmpty || pass.text.isEmpty) {
-                            // show warning if any field is empty
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  "Please enter both email and password",
-                                ),
-                                backgroundColor: Colors.red,
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                            return; // stop further execution
-                          }
-                          try {
-                            UserCredential userCredential = await FirebaseAuth
-                                .instance
-                                .createUserWithEmailAndPassword(
-                                  email: email.text,
-                                  password: pass.text,
-                                );
-                            print(
-                              "User registered: ${userCredential.user?.uid}",
-                            );
-                            Navigator.pushReplacementNamed(context, '/home');
-                          } catch (e) {
-                            print("Error: $e");
-                          }
-                        },
+                        onPressed: isLoading ? null : signUp,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Color.fromRGBO(77, 77, 255, 1),
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: Color.fromRGBO(
+                            77,
+                            77,
+                            255,
+                            0.5,
+                          ),
                           minimumSize: Size(
                             MediaQuery.of(context).size.height * 0.9,
                             MediaQuery.of(context).size.width * 0.13,
@@ -452,9 +603,20 @@ class _MyHomePageState extends State<MyHomePage> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: Text('SignUp'),
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('SignUp'),
                       ),
                       SizedBox(height: 10),
+
+                      // Already have an account? Login
                       Row(
                         children: [
                           Expanded(
